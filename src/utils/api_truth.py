@@ -121,8 +121,11 @@ API_TRUTH: List[Dict[str, Any]] = [
                    "only node methods exposed are GetNumNodes, GetLUT, SetLUT, "
                    "Get/SetNodeCacheMode, GetNodeLabel, GetToolsInNode, "
                    "SetNodeEnabled, ApplyGradeFromDRX, ApplyArriCdlLut, "
-                   "ResetAllGrades. There is NO way to add/delete nodes, create "
-                   "parallel/layer/mixer nodes, set blend modes, or wire inputs.",
+                   "ResetAllGrades. There is NO way to add a node, delete a node, "
+                   "create parallel/layer/mixer nodes, set blend modes, or "
+                   "connect/wire node inputs: there is no AddNode / SetNodeInput, "
+                   "so you cannot add node, create node, or connect nodes "
+                   "programmatically.",
         "recommended": "Build complex topologies once in the GUI, save a "
                        "PowerGrade .drx, and apply with safe_apply_drx / "
                        "ApplyGradeFromDRX (full-replace, no append). Propagate an "
