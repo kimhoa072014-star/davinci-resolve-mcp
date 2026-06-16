@@ -108,6 +108,201 @@ API_TRUTH: List[Dict[str, Any]] = [
                        "run while serving over stdio.",
         "tags": ["runtime", "stdio", "subprocess"],
     },
+
+    # ── Color page: node graph, grades, LUT/DCTL ──────────────────────────
+    # Discovered during a production color-grading workflow on Resolve Studio
+    # 20.2.x (an 87-clip graded timeline). Structural facts — which graph/item
+    # methods exist — were re-confirmed live on 20.2.1.6; behavioral facts are
+    # stamped per entry. New entries carry an optional `verified_on`.
+    {
+        "symbol": "TimelineItem node graph construction (AddNode / SetNodeInput / connect)",
+        "object": "TimelineItem.GetNodeGraph() / Graph",
+        "reality": "The node graph is structurally READ-ONLY from scripting. The "
+                   "only node methods exposed are GetNumNodes, GetLUT, SetLUT, "
+                   "Get/SetNodeCacheMode, GetNodeLabel, GetToolsInNode, "
+                   "SetNodeEnabled, ApplyGradeFromDRX, ApplyArriCdlLut, "
+                   "ResetAllGrades. There is NO way to add/delete nodes, create "
+                   "parallel/layer/mixer nodes, set blend modes, or wire inputs.",
+        "recommended": "Build complex topologies once in the GUI, save a "
+                       "PowerGrade .drx, and apply with safe_apply_drx / "
+                       "ApplyGradeFromDRX (full-replace, no append). Propagate an "
+                       "existing graph with CopyGrades([targets]).",
+        "tags": ["color", "node-graph", "missing-method", "drx"],
+        "verified_on": "DaVinci Resolve Studio 20.2.1.6 (live graph_methods)",
+    },
+    {
+        "symbol": "TimelineItem.ApplyGradeFromDRX",
+        "object": "TimelineItem / Graph",
+        "reality": "Replaces the ENTIRE node graph (no append mode). In direct "
+                   "scripting it consistently returns None instead of a "
+                   "success/failure flag, and when the scripting bridge has "
+                   "degraded the method reference itself can become None "
+                   "(hasattr True, getattr None).",
+        "recommended": "Use timeline_item_color.safe_apply_drx, which snapshots "
+                       "the grade version first and validates via GetLUT readback; "
+                       "re-fetch the item before each call and never cache the "
+                       "bound method.",
+        "tags": ["color", "drx", "unreliable-return", "bridge"],
+        "verified_on": "DaVinci Resolve Studio 20.2.1.6 (live: full-replace) / 20.x session (None return)",
+    },
+    {
+        "symbol": "Graph.SetLUT",
+        "object": "Graph (Color page node)",
+        "reality": "Returns True immediately, but DCTL/LUT compilation is "
+                   "ASYNCHRONOUS — a build-error dialog appears later. A True "
+                   "return does not mean the LUT/DCTL compiled or applied.",
+        "recommended": "Do not trust the return value. Let Resolve settle, then "
+                       "verify via GetLUT readback and/or check the DCTL build "
+                       "error dialog / ResolveDebug.txt.",
+        "tags": ["color", "lut", "dctl", "unreliable-return", "async"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Graph.GetLUT",
+        "object": "Graph (Color page node)",
+        "reality": "Only reliable for clips on the CURRENT timeline. After "
+                   "switching timelines it can return empty/None even where LUTs "
+                   "exist — never build reference-counting / cleanup logic on top "
+                   "of cross-timeline GetLUT results.",
+        "recommended": "Set each timeline current before scanning its clips, then "
+                       "restore the original current timeline.",
+        "tags": ["color", "lut", "timeline", "unreliable-return"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Grade keyframes (per-clip dynamics)",
+        "object": "TimelineItem / Graph",
+        "reality": "No scripting API to create, read, or detect grade keyframes "
+                   "(dynamics) inside a clip.",
+        "recommended": "Split the clip at the change point and apply a different "
+                       "CDL/grade per segment, or leave dynamic secondaries to a "
+                       "human in the GUI.",
+        "tags": ["color", "keyframe", "missing-method"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Power Windows / qualifiers / tracking",
+        "object": "TimelineItem",
+        "reality": "No scripting API for Power Window shapes, HSL/luma "
+                   "qualifiers, or tracking. The only secondary-region tools "
+                   "exposed are the AI ones: CreateMagicMask / RegenerateMagicMask "
+                   "(plus Stabilize / SmartReframe).",
+        "recommended": "Bake window/qualifier structures into a .drx template, or "
+                       "approximate soft-limiting in a custom DCTL.",
+        "tags": ["color", "missing-method", "power-window", "qualifier"],
+        "verified_on": "DaVinci Resolve Studio 20.2.1.6 (live item_methods)",
+    },
+    {
+        "symbol": "Built-in scopes (waveform / histogram / vectorscope / parade)",
+        "object": "(Color page UI)",
+        "reality": "Resolve's built-in scopes have NO scripting API or data "
+                   "export; they only render in the UI.",
+        "recommended": "Pull a frame with GetCurrentClipThumbnailImage() "
+                       "(in-memory, no disk I/O) and compute waveform/histogram/"
+                       "vector locally in Python.",
+        "tags": ["color", "scopes", "missing-method"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production session; confirmed vs official docs)",
+    },
+    {
+        "symbol": "SetClipProperty('Input Color Space')",
+        "object": "TimelineItem / MediaPoolItem (RCM)",
+        "reality": "Accepts only exact RCM strings; anything slightly off fails "
+                   "silently. Verified working values include 'DJI D-Gamut/D-Log', "
+                   "'S-Gamut3.Cine/S-Log3' (no 'Sony' prefix), 'Rec.709 Gamma 2.4', "
+                   "'ARRI LogC3'. Once set there is no API to reset a clip back to "
+                   "the project/Auto default.",
+        "recommended": "Keep an allowlist of verified strings and read back with "
+                       "GetClipProperty after every set; record the chosen ICS "
+                       "since it cannot be cleared.",
+        "tags": ["color", "rcm", "enum", "silent-failure"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Timeline.SetCurrentTimecode",
+        "object": "Timeline",
+        "reality": "Does not reliably move the playhead; it can freeze on the "
+                   "previous frame, so a following ExportCurrentFrameAsStill / "
+                   "still grab captures the WRONG (stale) frame. Worsens as the "
+                   "scripting bridge degrades.",
+        "recommended": "For frame-accurate output use the Deliver/render path, not "
+                       "SetCurrentTimecode + still grab; re-read GetCurrentTimecode "
+                       "to confirm before relying on the playhead.",
+        "tags": ["timeline", "playhead", "unreliable-return", "bridge"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Graph.ExportStills / Gallery still grab",
+        "object": "Graph / GalleryStill",
+        "reality": "Fails ('ensure the Gallery panel is open on the Color page') "
+                   "when the Gallery panel is not actually visible.",
+        "recommended": "Use ExportCurrentFrameAsStill (no Gallery panel needed), "
+                       "or open the Color page Gallery panel before calling.",
+        "tags": ["color", "gallery", "stills", "ui-state"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "fusionscript bridge (stateful, degrades under churn)",
+        "object": "(scripting bridge runtime)",
+        "reality": "The scripting bridge is a stateful service living inside the "
+                   "Resolve process. After dozens of short-lived connections / "
+                   "held-then-stale remote object references it DEGRADES: bound "
+                   "methods become None, SaveProject raises NoneType, "
+                   "SetCurrentTimecode freezes the playhead, GetClipProperty "
+                   "returns empty. The symptoms masquerade as unrelated bugs.",
+        "recommended": "Use one long-lived connection (the MCP server) and "
+                       "re-fetch objects per call instead of bulk one-off scripts. "
+                       "When symptoms appear, restart Resolve to reset the bridge "
+                       "(SaveProject first where possible).",
+        "tags": ["runtime", "bridge", "stability", "silent-failure"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Timeline.GetItemListInTrack",
+        "object": "Timeline",
+        "reality": "Returns ALL items on the track including transitions, and is "
+                   "blind to multi-track occlusion (clips hidden under higher "
+                   "tracks still appear). Naive cleanup over its output can delete "
+                   "transitions/visible clips.",
+        "recommended": "Filter out transition items and compute visibility "
+                       "top-track-down before acting; treat only genuinely "
+                       "uncovered clips as visible.",
+        "tags": ["timeline", "occlusion", "transition"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production color session)",
+    },
+    {
+        "symbol": "Folder.SetName",
+        "object": "MediaPool Folder",
+        "reality": "Does not exist — a media-pool bin (Folder) cannot be renamed "
+                   "from scripting (mirrors Timeline.GetTimelineByName being "
+                   "absent).",
+        "recommended": "Name the bin at creation, or rename via the GUI / at the "
+                       ".drt XML layer; use SetCurrentFolder to navigate.",
+        "tags": ["media-pool", "missing-method", "folder"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production session)",
+    },
+    {
+        "symbol": "MediaPoolItem variable speed / FCPXML timeMap import",
+        "object": "MediaPoolItem / MediaPool.ImportTimelineFromFile",
+        "reality": "There is no API to set a clip's variable (ramped) speed, and "
+                   "importing FCPXML whose clips carry <timeMap> makes Resolve "
+                   "auto-wrap each into a compound clip — unavoidable via API or "
+                   "import flags.",
+        "recommended": "To flatten while keeping speed ramps, edit the .drt XML "
+                       "directly (preserve the MediaTimemapBA blob) instead of an "
+                       "FCPXML round-trip — see docs/notes/drt-format-notes.md.",
+        "tags": ["media-pool", "speed", "fcpxml", "compound", "missing-method"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production session)",
+    },
+    {
+        "symbol": "MediaPool.RelinkClips",
+        "object": "MediaPool",
+        "reality": "Returns only a single batch bool; it does not report which "
+                   "clips relinked vs stayed offline.",
+        "recommended": "After calling, read GetClipProperty('Offline') on each "
+                       "affected clip to learn the real per-clip outcome.",
+        "tags": ["media-pool", "relink", "unreliable-return"],
+        "verified_on": "DaVinci Resolve Studio 20.x (production session)",
+    },
 ]
 
 

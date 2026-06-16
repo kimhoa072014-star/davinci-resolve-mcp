@@ -214,6 +214,44 @@ If a DCTL does not appear or does not apply:
 - For animated/noise effects, remember `TIMELINE_FRAME_INDEX` is meaningful in
   the DCTL plugin but defaults to `1` when used as a LUT.
 
+## Gotchas Verified In Production
+
+These were hit while generating and applying DCTLs at scale in a real grade
+(Resolve Studio 20.2.x). They all fail *silently or confusingly*, so they cost
+real debugging time.
+
+- **Non-ASCII comments break compilation.** A multi-byte (e.g. Chinese)
+  character anywhere in a `.dctl` — even in a `//` comment — makes Resolve's CTL
+  compiler fail. The DCTL just does not apply, with no obvious error. Keep DCTL
+  source pure ASCII; strip/transliterate comments in any generator.
+
+- **Global symbols share one namespace across the whole project.** Every DCTL
+  loaded in a project is linked into a **shared** global namespace. Two files
+  that each define a helper or constant of the same name (e.g. `ac_luma`,
+  `AC_EPS`) cause a duplicate-definition compile failure — and because it
+  depends on *which other DCTLs are currently loaded*, the failure is
+  **intermittent**. Give every global a file-scoped prefix; for per-shot baked
+  copies, prefix per instance.
+
+- **Integer-to-`f` produces an illegal literal that no-ops silently.** Building
+  DCTL via string templates, an integer parameter rendered as `{p}f` yields
+  `4f`, which is not a valid CUDA/Metal float literal. The DCTL **silently
+  does nothing** (no error dialog). Force every scalar to a real float so it
+  renders `4.0f`. (This is the failure mode behind the generic "use the `f`
+  suffix" check above.)
+
+- **A UI-param DCTL throws one harmless error on first compile.** Any DCTL with
+  `DEFINE_UI_PARAMS` pops `Error Processing DaVinci CTL` exactly once on its
+  first GPU compile, then recompiles itself successfully. It is a one-time,
+  harmless initialization artifact — do not treat it as a real failure. If it
+  matters to UX, pre-warm the DCTL set at startup so the first-compile error is
+  absorbed before the user interacts.
+
+- **Slider values cannot be set from scripting.** There is no API to set a
+  `DEFINE_UI_PARAMS` slider value on a node's DCTL. To ship a specific look,
+  **bake the parameter defaults into a per-shot copy** of the `.dctl` and assign
+  that file; the user can still tweak the sliders afterwards in the UI.
+
 ## Useful Future Additions
 
 Good repo additions, if DCTL workflows become common:
